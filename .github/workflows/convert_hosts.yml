@@ -1,0 +1,71 @@
+name: Convert Hosts to Rule List
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * *'  # 每天 UTC 02:00 (北京时间 10:00) 自动运行
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download and convert hosts file
+        run: |
+          # 1. 下载源文件
+          curl -sL "https://github.com/lingeringsound/10007/raw/refs/heads/main/all" -o raw_hosts.txt
+
+          # 2-4. 逐行处理
+          > keytoolazy_hosts_action.list
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            # 去除行尾回车符(兼容Windows换行)
+            line="${line%$'\r'}"
+
+            # 空行直接跳过
+            if [[ -z "$line" ]]; then
+              continue
+            fi
+
+            # 不以 0 开头的非空行 → 加 # 注释
+            if [[ "$line" != 0* ]]; then
+              echo "#${line}" >> keytoolazy_hosts_action.list
+              continue
+            fi
+
+            # 匹配 "0.0.0.0 xxx" 格式（注意中间有空格）
+            if [[ "$line" =~ ^0\.0\.0\.0[[:space:]]+(.+)$ ]]; then
+              target="${BASH_REMATCH[1]}"
+              # 去除可能的尾部空格
+              target="$(echo "$target" | xargs)"
+
+              # 3. 如果是纯 IP 地址 → IP-CIDR,n.n.n.n/32,no-resolve
+              if [[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                echo "IP-CIDR,${target}/32,no-resolve" >> keytoolazy_hosts_action.list
+              else
+                # 4. 否则是域名 → DOMAIN,x
+                echo "DOMAIN,${target}" >> keytoolazy_hosts_action.list
+              fi
+            else
+              # 其他以0开头但不符合 "0.0.0.0 x" 格式的行，加 # 注释
+              echo "#${line}" >> keytoolazy_hosts_action.list
+            fi
+          done < raw_hosts.txt
+
+          # 清理临时文件
+          rm -f raw_hosts.txt
+
+          echo "✅ 转换完成，共 $(wc -l < keytoolazy_hosts_action.list) 行"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add keytoolazy_hosts_action.list
+          if git diff --cached --quiet; then
+            echo "没有变更，跳过提交"
+          else
+            git commit -m "chore: update keytoolazy_hosts_action.list $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            git push
+          fi
