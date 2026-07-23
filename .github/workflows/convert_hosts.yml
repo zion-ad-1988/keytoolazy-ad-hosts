@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: '0 2 * * *'  # 每天 UTC 02:00 (北京时间 10:00) 自动运行
 
+permissions:
+  contents: write    # ← 加上这一行
+
 jobs:
   convert:
     runs-on: ubuntu-latest
